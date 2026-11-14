@@ -13,7 +13,12 @@ From that library it then derives:
   different codes on different models;
 - src/govee_local_api/data/model_scenes.json, the packaged per-model scene
   registry: the firmware scenes (sceneType 0 without a scenceParam blob,
-  which SceneMessages can play from the code alone) as shared scene sets.
+  which SceneMessages can play from the code alone) as shared scene sets,
+  plus, for the models in PARAMETER_SCENE_MODELS, their sceneType 6 scenes
+  with the parameter blob SceneCodeMessage sends.
+
+The model registry needs every scene type when a PARAMETER_SCENE_MODELS model
+is fetched (`--scene-type all`).
 
 Run with `python scripts/fetch_scene_library.py [-o OUTPUT] [--scene-type T]`,
 or regenerate one derived file from an existing library (no requests) with
@@ -21,6 +26,7 @@ or regenerate one derived file from an existing library (no requests) with
 """
 
 import argparse
+import base64
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -57,6 +63,14 @@ SCENE_DEVICES_FILE = "scene_devices.json"
 MODEL_SCENES_FILE = REPO_ROOT / "src" / "govee_local_api" / "data" / "model_scenes.json"
 # Firmware scenes: the only type whose codes play without a parameter blob.
 MODEL_SCENE_TYPE = 0
+# Library scenes that need their scenceParam blob are only packaged for models
+# where playing them over the LAN was verified on a real device. sceneType 6
+# (cmdVersion 6) is the H3A53's dual-layer format; its blobs begin with a
+# 0x0a byte that must not be sent (with it the device plays a fallback
+# animation), so the packaged parameter omits it.
+PARAMETER_SCENE_TYPE = 6
+PARAMETER_SCENE_MODELS = frozenset({"H3A53"})
+PARAMETER_SCENE_PREFIX = 0x0A
 # " B" in "Aurora B": a single capital letter ending a scene name.
 VARIANT_SUFFIX = re.compile(r" [A-Z]$")
 # Home Assistant translation keys must match [a-z0-9-_]+ (hassfest).
@@ -90,13 +104,14 @@ def extract_scenes(
     data: dict[str, Any], scene_type: int | None
 ) -> list[dict[str, Any]]:
     """Flatten the library into [{name, code, type, effects, param,
-    scene_id, scene, variant}], skipping sceneCode 0.
+    param_data, scene_id, scene, variant}], skipping sceneCode 0.
 
     Scenes are filtered on the scene node's sceneType (`scene_type=None`
     keeps every type). The usable sceneCode lives on each scene's
     lightEffects; a scene with several effects gets the effect name appended
     to tell them apart, and `effects` records how many it has. `param` is
-    whether the effect needs a scenceParam blob to play. `scene_id`, `scene`
+    whether the effect needs a scenceParam blob to play, and `param_data`
+    that blob as Govee sends it (base64, "" when there is none). `scene_id`, `scene`
     and `variant` keep the scene node's id, its own name and the effect's
     variant letter ("" for single-effect scenes) apart from `name`, so
     build_model_scenes can tell an appended variant letter from a letter that
@@ -122,6 +137,7 @@ def extract_scenes(
                         "type": scene.get("sceneType"),
                         "effects": len(effects),
                         "param": bool(effect.get("scenceParam")),
+                        "param_data": effect.get("scenceParam") or "",
                         "scene_id": scene.get("sceneId"),
                         "scene": scene.get("sceneName", ""),
                         "variant": (
@@ -153,10 +169,23 @@ def build_scene_devices(library: Library) -> dict[str, dict[str, list[str]]]:
     }
 
 
-def name_model_scenes(scenes: list[dict[str, Any]]) -> list[tuple[str, int]]:
-    """A model's firmware scenes as [(name, code)], names in Govee's casing.
+def _is_kept(scene: dict[str, Any], with_parameter_scenes: bool) -> bool:
+    if scene["type"] == MODEL_SCENE_TYPE and not scene["param"]:
+        return True
+    return (
+        with_parameter_scenes
+        and scene["type"] == PARAMETER_SCENE_TYPE
+        and bool(scene["param"])
+    )
 
-    Keeps sceneType 0 without a scenceParam blob. Variant letters only appear
+
+def name_model_scenes(
+    scenes: list[dict[str, Any]], with_parameter_scenes: bool = False
+) -> list[tuple[str, dict[str, Any]]]:
+    """A model's kept scenes as [(name, scene)], names in Govee's casing.
+
+    Keeps sceneType 0 without a scenceParam blob, plus sceneType 6 scenes
+    with one when `with_parameter_scenes`. Variant letters only appear
     where they tell two kept scenes apart: an effect's variant is appended
     only when two or more variants of the same scene are kept, and a variant
     letter in Govee's own scene name ("Aurora B", the firmware twin of a
@@ -164,26 +193,67 @@ def name_model_scenes(scenes: list[dict[str, Any]]) -> list[tuple[str, int]]:
     name without it ("Shiny" next to "Shiny B"). The library's scene keys
     are these names passed through scene_key().
     """
-    kept = [
-        scene
-        for scene in scenes
-        if scene["type"] == MODEL_SCENE_TYPE and not scene["param"]
-    ]
+    kept = [scene for scene in scenes if _is_kept(scene, with_parameter_scenes)]
     kept_variants = Counter(scene["scene_id"] for scene in kept)
     named = []
     for scene in kept:
         name = scene["scene"]
         if kept_variants[scene["scene_id"]] > 1 and scene["variant"]:
             name = f"{name} {scene['variant']}"
-        named.append((name, scene["code"]))
+        named.append((name, scene))
     # A trailing capital letter is a variant marker (Govee only uses A-D
     # there); drop it when no other kept scene shares the base name.
     bases = Counter(VARIANT_SUFFIX.sub("", name).lower() for name, _ in named)
     result = []
-    for name, code in named:
+    for name, scene in named:
         base = VARIANT_SUFFIX.sub("", name)
-        result.append((base if bases[base.lower()] == 1 else name, code))
-    return result
+        result.append((base if bases[base.lower()] == 1 else name, scene))
+    # Distinct scenes Govee gave the same name (H3A53: two "Dusk" in Sky, a
+    # "Mild" in both Soothing and Emotion) are numbered in library order:
+    # "Dusk", "Dusk 2".
+    keys: Counter[str] = Counter()
+    numbered = []
+    for name, scene in result:
+        keys[scene_key(name)] += 1
+        count = keys[scene_key(name)]
+        numbered.append((name if count == 1 else f"{name} {count}", scene))
+    return numbered
+
+
+SceneEntry = int | list[int | str]
+
+
+def model_scene_entries(
+    sku: str, scenes: list[dict[str, Any]]
+) -> list[tuple[str, SceneEntry]]:
+    """A model's packaged scenes as [(display name, entry)].
+
+    An entry is a firmware scene's one-byte code, or [code, base64 param]
+    for a parameter scene (PARAMETER_SCENE_MODELS only) with the param
+    exactly as SceneCodeMessage must send it. Scenes the library can't play
+    are skipped with a warning: firmware codes above one byte, and
+    parameter blobs without the expected sceneType 6 prefix.
+    """
+    entries: list[tuple[str, SceneEntry]] = []
+    named = name_model_scenes(scenes, sku in PARAMETER_SCENE_MODELS)
+    for name, scene in named:
+        code = scene["code"]
+        if not scene["param"]:
+            if code > 0xFF:
+                # SceneMessages carries a single code byte.
+                _LOGGER.warning("%s: skipping %r, code %d > 255", sku, name, code)
+                continue
+            entries.append((name, code))
+            continue
+        blob = base64.b64decode(scene["param_data"])
+        if not blob or blob[0] != PARAMETER_SCENE_PREFIX or code > 0xFFFF:
+            _LOGGER.warning(
+                "%s: skipping %r, unexpected parameter blob or code", sku, name
+            )
+            continue
+        param = base64.b64encode(blob[1:]).decode("ascii")
+        entries.append((name, [code, param]))
+    return entries
 
 
 def scene_key(name: str) -> str:
@@ -204,9 +274,8 @@ def build_ha_scene_names(library: Library) -> dict[str, str]:
     for sku, scenes in library.items():
         if sku not in GOVEE_LIGHT_CAPABILITIES:
             continue
-        for name, code in name_model_scenes(scenes):
-            if code <= 0xFF:  # the same filter build_model_scenes applies
-                spellings[scene_key(name)][name] += 1
+        for name, _entry in model_scene_entries(sku, scenes):
+            spellings[scene_key(name)][name] += 1
     names = {}
     for key, counts in sorted(spellings.items()):
         display = sorted(counts.items(), key=lambda c: (-c[1], c[0]))[0][0]
@@ -215,11 +284,11 @@ def build_ha_scene_names(library: Library) -> dict[str, str]:
 
 
 def build_model_scenes(library: Library) -> dict[str, dict[str, Any]]:
-    """Build the packaged registry: {"sets": {id: {name: code}}, "models":
+    """Build the packaged registry: {"sets": {id: {name: entry}}, "models":
     {sku: id | None}}.
 
-    Keeps each model's firmware scenes as named by name_model_scenes(), keyed
-    by scene_key() ("snow_flake"). Two kept scenes with the same key raise
+    Keeps each model's scenes as given by model_scene_entries(), keyed by
+    scene_key() ("snow_flake"). Two kept scenes with the same key raise
     ValueError rather than one silently replacing the other.
     Models with the same scenes share one set; a set's id is a hash of its contents, so regenerating
     keeps unchanged ids stable. Models without firmware scenes map to None, so
@@ -227,7 +296,7 @@ def build_model_scenes(library: Library) -> dict[str, dict[str, Any]]:
     GOVEE_LIGHT_CAPABILITIES (a library file can predate a registry change)
     are left out.
     """
-    sets: dict[str, dict[str, int]] = {}
+    sets: dict[str, dict[str, SceneEntry]] = {}
     models: dict[str, str | None] = {}
     unregistered = sorted(set(library) - set(GOVEE_LIGHT_CAPABILITIES))
     if unregistered:
@@ -243,19 +312,21 @@ def build_model_scenes(library: Library) -> dict[str, dict[str, Any]]:
             raise ValueError(
                 f"{sku}: library entries lack 'scene_id'; refetch the library"
             )
-        model_scenes: dict[str, int] = {}
-        for name, code in name_model_scenes(scenes):
-            name = scene_key(name)
-            if code > 0xFF:
-                # SceneMessages carries a single code byte.
-                _LOGGER.warning("%s: skipping %r, code %d > 255", sku, name, code)
-            elif name in model_scenes:
+        if sku in PARAMETER_SCENE_MODELS and any(
+            "param_data" not in scene for scene in scenes
+        ):
+            raise ValueError(
+                f"{sku}: library entries lack 'param_data'; refetch the library"
+            )
+        model_scenes: dict[str, SceneEntry] = {}
+        for name, entry in model_scene_entries(sku, scenes):
+            key = scene_key(name)
+            if key in model_scenes:
                 raise ValueError(
-                    f"{sku}: two scenes with the key {name!r} "
-                    f"(codes {model_scenes[name]} and {code})"
+                    f"{sku}: two scenes with the key {key!r} "
+                    f"({model_scenes[key]} and {entry})"
                 )
-            else:
-                model_scenes[name] = code
+            model_scenes[key] = entry
         if not model_scenes:
             models[sku] = None
             continue
@@ -435,6 +506,12 @@ def main() -> int:
 
     if args.scene_devices_only:
         pass
+    elif args.scene_type == MODEL_SCENE_TYPE and PARAMETER_SCENE_MODELS & set(library):
+        _LOGGER.warning(
+            "Not writing %s: %s need every scene type (--scene-type all)",
+            MODEL_SCENES_FILE.name,
+            ", ".join(sorted(PARAMETER_SCENE_MODELS & set(library))),
+        )
     elif args.scene_type not in (MODEL_SCENE_TYPE, None):
         _LOGGER.warning(
             "Not writing %s: it needs sceneType %d scenes, fetched type %d",

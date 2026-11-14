@@ -10,7 +10,11 @@ from govee_local_api.light_capabilities import (
     GOVEE_LIGHT_CAPABILITIES,
     create_with_capabilities,
 )
-from govee_local_api.message import ScanResponse
+from govee_local_api.message import (
+    ScanResponse,
+    SceneCodeMessage,
+    SceneMessages,
+)
 
 
 class TestGoveeDevice(unittest.TestCase):
@@ -222,6 +226,21 @@ class TestControllerTemperatureRange(unittest.TestCase):
         assert self._sent_temperature(device, 9000) == 6500
         assert self._sent_temperature(device, 4000) == 4000
 
+    def test_h3a53_accepts_its_full_1000_to_10000_k_range(self):
+        # Confirmed on the device: 1000 K is visibly warmer than 2000 K.
+        device = GoveeDevice(
+            self.controller,
+            "192.168.1.100",
+            "AA:BB:CC:DD:EE:FF",
+            "H3A53",
+            GOVEE_LIGHT_CAPABILITIES["H3A53"],
+        )
+
+        assert self._sent_temperature(device, 1000) == 1000
+        assert self._sent_temperature(device, 10000) == 10000
+        assert self._sent_temperature(device, 500) == 1000
+        assert self._sent_temperature(device, 12000) == 10000
+
     def test_set_color_clamps_to_the_default_range(self):
         device = GoveeDevice(
             self.controller,
@@ -233,3 +252,42 @@ class TestControllerTemperatureRange(unittest.TestCase):
 
         assert self._sent_temperature(device, 99999) == 9000
         assert self._sent_temperature(device, 1) == 2000
+
+
+class TestControllerScenes(unittest.TestCase):
+    def setUp(self):
+        self.controller = GoveeController.__new__(GoveeController)
+        self.controller._send_message = Mock()
+        self.controller._logger = Mock()
+        self.device = GoveeDevice(
+            self.controller,
+            "192.168.1.100",
+            "AA:BB:CC:DD:EE:FF",
+            "H3A53",
+            GOVEE_LIGHT_CAPABILITIES["H3A53"],
+        )
+
+    def _sent(self, scene):
+        asyncio.run(self.controller.set_scene(self.device, scene))
+        if not self.controller._send_message.called:
+            return None
+        return self.controller._send_message.call_args[0][0]
+
+    def test_firmware_scene_is_sent_as_scene_message(self):
+        message = self._sent("rainbow")
+
+        assert isinstance(message, SceneMessages)
+        assert message.as_dict() == SceneMessages(b"\x16").as_dict()
+
+    def test_parameter_scene_is_sent_with_its_parameter_blob(self):
+        code, param = self.device.capabilities.parameter_scenes["aurora"]
+
+        message = self._sent("Aurora")
+
+        assert isinstance(message, SceneCodeMessage)
+        assert message.as_dict() == SceneCodeMessage(code, param).as_dict()
+        assert code == 33742
+
+    def test_unknown_scene_sends_nothing(self):
+        assert self._sent("no_such_scene") is None
+        self.controller._logger.warning.assert_called_once()

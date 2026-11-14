@@ -44,8 +44,10 @@ def generate() -> str:
         "Scenes are each model's firmware scenes from Govee's per-model scene"
         " library (generated into `model_scenes.json` by"
         " `scripts/generate_model_scenes.py`): the ones that play from their"
-        f" scene code alone. Models marked {NO} have none. Scenes that need a"
-        " parameter blob can still be sent with `set_scene_code()`.",
+        " scene code alone, plus, for models verified to play them (H3A53),"
+        f" library scenes that need a parameter blob. Models marked {NO} have"
+        " none. Other scenes that need a parameter blob can still be sent with"
+        " `set_scene_code()`.",
         "",
         "Color temperature defaults to"
         f" {DEFAULT_TEMPERATURE_RANGE.min_kelvin}-"

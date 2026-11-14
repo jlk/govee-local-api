@@ -2,8 +2,9 @@
 """Generate src/govee_local_api/data/model_scenes.json from the registry.
 
 Fetches Govee's scene library (one request per SKU) and writes the packaged
-per-model scene sets: firmware scenes only (sceneType 0 without a scenceParam
-blob), keyed by lowercase name. Models without firmware scenes are recorded
+per-model scene sets: firmware scenes (sceneType 0 without a scenceParam blob),
+plus the parameter scenes of the models in PARAMETER_SCENE_MODELS, keyed by
+lowercase name. Models without firmware scenes are recorded
 as null, so the file lists every model that was checked.
 
     uv run python scripts/generate_model_scenes.py              # new models only
@@ -32,7 +33,6 @@ from typing import Any
 
 from fetch_scene_library import (
     GOVEE_LIGHT_CAPABILITIES,
-    MODEL_SCENE_TYPE,
     MODEL_SCENES_FILE,
     REPO_ROOT,
     build_ha_scene_names,
@@ -124,7 +124,9 @@ def main() -> int:
             _LOGGER.info("Removed models: %s", ", ".join(removed))
 
     started = time.monotonic()
-    library, failures = fetch_all(MODEL_SCENE_TYPE, skus)
+    # Every scene type: models in PARAMETER_SCENE_MODELS keep sceneType 6
+    # scenes too. Other models still keep only their firmware scenes.
+    library, failures = fetch_all(None, skus)
     if failures:
         _LOGGER.error(
             "Not writing %s: %d devices failed: %s",

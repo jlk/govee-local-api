@@ -1,3 +1,4 @@
+import base64
 from importlib.resources import files
 import json
 import re
@@ -39,6 +40,7 @@ def test_every_registered_model_has_a_range():
         ("H60A6", (2700, 6500)),
         ("H612F", (2800, 9000)),
         ("H61B3", (2000, 7200)),
+        ("H3A53", (1000, 10000)),
         ("H6006", DEFAULT_TEMPERATURE_RANGE),
     ],
 )
@@ -116,18 +118,25 @@ def test_registry_scenes_come_from_the_model_scenes_file():
     data = _model_scenes_file()
     for sku, capabilities in GOVEE_LIGHT_CAPABILITIES.items():
         set_id = data["models"].get(sku)
-        expected = (
-            {name: bytes([code]) for name, code in data["sets"][set_id].items()}
-            if set_id
-            else {}
-        )
-        assert capabilities.scenes == expected, sku
+        entries = data["sets"][set_id] if set_id else {}
+        firmware = {
+            name: bytes([entry])
+            for name, entry in entries.items()
+            if isinstance(entry, int)
+        }
+        parameter = {
+            name: (entry[0], base64.b64decode(entry[1]))
+            for name, entry in entries.items()
+            if not isinstance(entry, int)
+        }
+        assert capabilities.scenes == firmware, sku
+        assert capabilities.parameter_scenes == parameter, sku
 
 
 def test_scene_feature_flag_matches_the_scene_set():
     for sku, capabilities in GOVEE_LIGHT_CAPABILITIES.items():
         has_flag = bool(capabilities.features & GoveeLightFeatures.SCENES)
-        assert has_flag == bool(capabilities.scenes), sku
+        assert has_flag == bool(capabilities.available_scenes), sku
 
 
 def test_model_scenes_file_is_consistent():
@@ -136,11 +145,20 @@ def test_model_scenes_file_is_consistent():
     assert set(data["models"].values()) - {None} == set(data["sets"])
     for set_id, scenes in data["sets"].items():
         assert scenes, set_id
-        for name, code in scenes.items():
-            # SceneMessages carries one code byte; keys are valid Home
-            # Assistant translation keys, which must match [a-z0-9-_]+.
-            assert 0 < code <= 0xFF, (set_id, name)
+        for name, entry in scenes.items():
+            # Keys are valid Home Assistant translation keys, which must
+            # match [a-z0-9-_]+.
             assert re.fullmatch(r"[a-z0-9_-]+", name), (set_id, name)
+            if isinstance(entry, int):
+                # SceneMessages carries one code byte.
+                assert 0 < entry <= 0xFF, (set_id, name)
+                continue
+            # [scene code, base64 parameter] for SceneCodeMessage, stored
+            # without the sceneType 6 0x0a prefix.
+            code, param = entry
+            assert 0 < code <= 0xFFFF, (set_id, name)
+            blob = base64.b64decode(param, validate=True)
+            assert blob and blob[0] != 0x0A, (set_id, name)
 
 
 def test_model_scenes_file_covers_exactly_the_registry():
@@ -204,3 +222,65 @@ def test_model_unknown_to_the_scene_library_has_no_scenes():
     capabilities = GOVEE_LIGHT_CAPABILITIES["H6076A"]
     assert capabilities.scenes == {}
     assert capabilities.features & GoveeLightFeatures.COLOR_RGB
+
+
+def test_h3a53_capabilities():
+    capabilities = GOVEE_LIGHT_CAPABILITIES["H3A53"]
+    assert capabilities.features == (
+        GoveeLightFeatures.COLOR_RGB
+        | GoveeLightFeatures.COLOR_KELVIN_TEMPERATURE
+        | GoveeLightFeatures.BRIGHTNESS
+        | GoveeLightFeatures.SEGMENT_CONTROL
+        | GoveeLightFeatures.SCENES
+    )
+    # 12 segments, confirmed on the device and by Govee's OpenAPI.
+    assert capabilities.segments_count == 12
+    assert capabilities.segments[11] == b"\x00\x08"
+
+
+def test_h3a53_scenes():
+    capabilities = GOVEE_LIGHT_CAPABILITIES["H3A53"]
+    assert capabilities.scenes == {
+        "white_light": b"\x63",
+        "illumination": b"\x62",
+        "rainbow": b"\x16",
+        "going_home": b"\x02",
+    }
+    # The dual-layer (sceneType 6) scenes, played with SceneCodeMessage.
+    assert len(capabilities.parameter_scenes) == 87
+    code, param = capabilities.parameter_scenes["aurora"]
+    assert code == 33742
+    # Stored without the 0x0a prefix: two records, the first 0x2a bytes long.
+    assert param[:2] == b"\x02\x2a"
+    # Distinct scenes sharing a name are numbered.
+    assert {"dusk", "dusk_2", "mild", "mild_2"} <= set(capabilities.parameter_scenes)
+    assert (
+        capabilities.parameter_scenes["dusk"] != capabilities.parameter_scenes["dusk_2"]
+    )
+    assert capabilities.available_scenes[:4] == list(capabilities.scenes)
+    assert len(capabilities.available_scenes) == 91
+
+
+def test_only_verified_models_have_parameter_scenes():
+    with_parameter_scenes = {
+        sku
+        for sku, capabilities in GOVEE_LIGHT_CAPABILITIES.items()
+        if capabilities.parameter_scenes
+    }
+    assert with_parameter_scenes == {"H3A53"}
+
+
+def test_parameter_scenes_need_the_scenes_feature():
+    parameter_scenes = {"aurora": (33742, b"\x01\x02")}
+    without = GoveeLightCapabilities(
+        GoveeLightFeatures.COLOR_RGB, parameter_scenes=parameter_scenes
+    )
+    with_scenes = GoveeLightCapabilities(
+        GoveeLightFeatures.SCENES, parameter_scenes=parameter_scenes
+    )
+    assert without.parameter_scenes == {}
+    assert with_scenes.parameter_scenes == parameter_scenes
+    assert with_scenes.parameter_scenes is not parameter_scenes
+    assert with_scenes.available_scenes == ["aurora"]
+    assert "parameter_scenes=" in repr(with_scenes)
+    assert "parameter_scenes=1" in str(with_scenes)

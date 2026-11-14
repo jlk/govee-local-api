@@ -162,6 +162,12 @@ class SceneCodeMessage(PtRealMessage):
     without parameters are a single activation frame, identical to
     ``SceneMessages``. Encoding follows wez/govee2mqtt (``src/ble.rs``,
     ``SetSceneCode::encode``).
+
+    ``sceneType`` 6 blobs (the dual-layer scenes of the H3A53) begin with a
+    ``0x0a`` byte that must be dropped before passing them here: sent with
+    it, the device plays a fallback animation instead of the scene. The
+    parameters stored in the packaged scene registry are already stripped.
+    Devices cache a scene's parameters by its code.
     """
 
     FRAME_PAYLOAD_SIZE = 19  # 20-byte BLE frame minus the checksum byte
