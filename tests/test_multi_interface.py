@@ -500,12 +500,12 @@ class TestListeningSocketFlags(unittest.TestCase):
         controller._listening_port = 0
         sock = controller._create_listening_socket("127.0.0.1")
         try:
-            self.assertEqual(sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR), 1)
-            self.assertEqual(sock.getsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST), 1)
+            # Boolean options read back as "non-zero", not necessarily 1:
+            # macOS/BSD return the option's flag bit (e.g. SO_REUSEADDR -> 4).
+            self.assertTrue(sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR))
+            self.assertTrue(sock.getsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST))
             if hasattr(socket, "SO_REUSEPORT"):
-                self.assertEqual(
-                    sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT), 1
-                )
+                self.assertTrue(sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT))
             # And the socket really is bound.
             self.assertNotEqual(sock.getsockname()[1], 0)
         finally:
