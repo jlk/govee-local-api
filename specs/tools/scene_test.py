@@ -37,7 +37,10 @@ if mode == "edit":
             blob[p : p + 3] = LAYER_RGB[layer]
         print(f"record layer={layer} colors={count} -> {LAYER_RGB[layer].hex()}")
         i = r + L
-msg = SceneCodeMessage(eff["sceneCode"], bytes(blob))
+# sceneType 6 blobs start with a 0x0a byte that must not be sent (confirmed
+# 2026-11-14: with it the device plays a fallback animation, without it the real scene).
+param = bytes(blob[1:]) if blob[0] == 0x0A else bytes(blob)
+msg = SceneCodeMessage(eff["sceneCode"], param)
 frames = [base64.b64decode(f).hex() for f in msg.data["command"]]
 print(f"{name} code={eff['sceneCode']} blob={len(blob)}B frames={len(frames)}")
 for f in frames:

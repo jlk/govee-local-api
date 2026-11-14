@@ -158,3 +158,40 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
   - The real Aurora started from the app looks different (Aurora palette, slower).
   - **Conclusion:** the device needs the `a3` stream (the activation alone does nothing) but doesn't interpret our blob as Aurora. It plays a fallback animation that ignores the blob's colours. The `a3` framing for `sceneType` 6 / `cmdVersion` 6 probably differs from the type-2 framing `SceneCodeMessage` implements. Side note: the fallback **does** drive the zones separately, so the firmware has a per-zone path.
   - After these scenes, `devStatus` reported brightness 51 (it had been 100).
+- **2026-11-14:** **Type-6 scenes play over the LAN** with `SceneCodeMessage` once the blob's leading `0x0a` byte is dropped (`specs/tools/scene_framing.py`, Aurora, stock):
+
+  | Packaging                             | Result                       |
+  | ------------------------------------- | ---------------------------- |
+  | header marker `02`, full blob         | fallback animation (earlier) |
+  | header marker `06`, full blob         | nothing                      |
+  | header marker `0a`, blob without `0a` | **real Aurora**              |
+  | header marker `02`, blob without `0a` | **real Aurora**              |
+  | header marker `04`, full blob         | nothing                      |
+
+  - So the library only needs to strip the `0a`; the header marker stays `02`.
+  - **The device caches a scene by its code.** After real Aurora had played once, sending code 33742 with an edited blob kept playing the stock Aurora. Experiments therefore use fresh codes (40001+), which the device accepts for custom blobs.
+
+- **2026-11-14:** Recolouring Aurora's records under fresh codes (`specs/tools/scene_layers.py`):
+
+  | Edit                  | Observed                                |
+  | --------------------- | --------------------------------------- |
+  | rec0 red + rec1 green | all green                               |
+  | rec0 red, rec1 stock  | Aurora-like, no visible red             |
+  | rec0 stock, rec1 red  | **lower zone red** (upper: Aurora rec0) |
+
+  - **Conclusion:** stock rec0 occupies the upper zone when combined with rec1. Recolouring rec0 at the assumed colour offsets didn't show, so rec0's colours may be laid out differently from the template's.
+
+- **2026-11-14:** Scenes built from copies of Aurora rec1 (`specs/tools/scene_build.py`; template `000000010001ffff00801414008014 02 3dfe70 175ffe 00008000008000 010101ff`):
+
+  | Scene (records in order)                          | Observed                                          |
+  | ------------------------------------------------- | ------------------------------------------------- |
+  | red b3=00/tail=00 + green b3=01/tail=01           | both zones green                                  |
+  | single red with b3/tail = 00/00, 00/01 or 01/00   | both zones red (all three)                        |
+  | single red, bytes1-2=`0305`                       | all red **except one node off**                   |
+  | green + red(`0305`) / red(`0305`) + green         | **all yellow**, that one node green (both orders) |
+  | single red, bytes1-2=`020a`                       | all off                                           |
+  | single red, byte4=`02`                            | both zones red                                    |
+  | green + red(byte4=`02`) / red(byte4=`02`) + green | yellowish-green (both orders)                     |
+
+  - **Conclusions:** neither header byte 3 nor the tail byte `rec[-2]` selects a zone. A single record covers both zones. Two plain records: the last wins. Bytes 1–2 look like a spatial pattern (`03 05` = every node but one; `02 0a` = nothing visible). `03 05` and byte 4 = `02` make records **blend additively**.
+  - **Zone selector still unknown.** The only per-zone result so far is stock Aurora rec0 (`000305000201ff8803801414038414`, 5 colours) sitting on the upper zone next to rec1. Next ideas: transplant rec0's header bytes 7–14 into the template one at a time; or decompile the Android app to read the effect-record format.
