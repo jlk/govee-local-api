@@ -54,8 +54,8 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 
 ## Phase 3 — Segment and dual-layer R&D
 
-- [ ] Check the existing segment command (`33 05 15 01 RGB … <2-byte mask>`): send to mask bits 1–12 one at a time and record what lights up (a strand? the upper zone? both zones?)
-- [ ] Try the mask bits above 12 (13–16), in case the second zone sits at bits 13–24 (needs a wider mask)
+- [x] Check the existing segment command (`33 05 15 01 RGB … <2-byte mask>`): send to mask bits 1–12 one at a time and record what lights up (a strand? the upper zone? both zones?)
+- [x] Try the mask bits above 12 (13–16), in case the second zone sits at bits 13–24 (needs a wider mask)
 - [ ] Try candidate layer selectors: other `33 05 15` subcommands (`02`, `03`, …), a trailing layer byte, and 3-byte masks. Keep a table of frame → observed effect
 - [ ] Try per-segment brightness (`33 05 15 02 <brightness> <mask>` on other models) and per-segment white/Kelvin
 - [ ] Use the H6008 bulbs (192.168.1.139 / .232) as a known-good control for the probe tooling
@@ -114,3 +114,17 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 
   - **Conclusion:** the standard JSON command set works and drives both zones together. Use `temperature_range=(1000, 10000)`; with the default range, `ColorMessage` would clamp away 1000–2000 K, which is clearly visible.
   - **Still open:** controlling each zone separately has to go through `ptReal` (Phase 3).
+
+- **2026-11-14:** Segment command (`SegmentColorMessages`, `33 05 15 01 RGB 00×5 <mask> 00×5`), with everything first set blue via `colorwc`:
+
+  | Frame (hex, with checksum)                 | Mask                   | Observed                                                                                                           |
+  | ------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+  | `33051501ff0000…0100…dc`                   | bit 1                  | No red seen from the user's position (1/12 of the run, about 17 ft, may have been out of view). Status stayed blue |
+  | `33051501ff00000000000000ff0f00000000002d` | bits 1–12              | **Whole run red, both zones.** Status changed to 255/0/0                                                           |
+  | `3305150100ff0000000000003f000000000000e2` | bits 1–6               | About half the run green, half red. Each head is the same colour in **both** zones. Status stayed red              |
+  | `330515010000ff000000000000f000000000002d` | bits 13–16             | No visible change                                                                                                  |
+  | `330515010000ff00000000000000ffffffffff22` | bits 17–56 (bytes 3–7) | No visible change                                                                                                  |
+
+  - **Conclusions:** the standard 12-bit segment mask works, and each bit colours **both zones** of its heads. The bits beyond 12 that we tried don't reach a second zone. `devStatus` only reflects colour commands that cover the whole run.
+  - **Mistakes during the session (for the record):** a mis-built `ptReal` sent five frames padded to 19 bytes, the first being `33 05 15 00 …`, with no visible effect reported. A frame with the mask shifted one byte, and possibly a frame with a bad checksum, were also sent. From then on every frame was built with the library classes.
+  - **Type-6 scene blobs** (`specs/research/scene_library_H3A53.json`) are layered effect descriptions (colour lists, timing, layer counts, e.g. Forest `0a042b0002140c…`), not simple per-zone frames. Not decoded yet (Phase 5).
