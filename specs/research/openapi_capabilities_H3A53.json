@@ -1,0 +1,270 @@
+{
+  "sku": "H3A53",
+  "device": "19:8B:C0:F8:C5:B5:1E:04",
+  "deviceName": "Permanent Lights 2 Pro",
+  "type": "devices.types.light",
+  "capabilities": [
+    {
+      "type": "devices.capabilities.on_off",
+      "instance": "powerSwitch",
+      "parameters": {
+        "dataType": "ENUM",
+        "options": [
+          {
+            "name": "on",
+            "value": 1
+          },
+          {
+            "name": "off",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "type": "devices.capabilities.range",
+      "instance": "brightness",
+      "parameters": {
+        "unit": "unit.percent",
+        "dataType": "INTEGER",
+        "range": {
+          "min": 1,
+          "max": 100,
+          "precision": 1
+        }
+      }
+    },
+    {
+      "type": "devices.capabilities.segment_color_setting",
+      "instance": "segmentedBrightness",
+      "parameters": {
+        "dataType": "STRUCT",
+        "fields": [
+          {
+            "fieldName": "segment",
+            "size": {
+              "min": 1,
+              "max": 12
+            },
+            "dataType": "Array",
+            "elementRange": {
+              "min": 0,
+              "max": 11
+            },
+            "elementType": "INTEGER",
+            "required": true
+          },
+          {
+            "fieldName": "brightness",
+            "dataType": "INTEGER",
+            "range": {
+              "min": 0,
+              "max": 100,
+              "precision": 1
+            },
+            "required": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "devices.capabilities.segment_color_setting",
+      "instance": "segmentedColorRgb",
+      "parameters": {
+        "dataType": "STRUCT",
+        "fields": [
+          {
+            "fieldName": "segment",
+            "size": {
+              "min": 1,
+              "max": 12
+            },
+            "dataType": "Array",
+            "elementRange": {
+              "min": 0,
+              "max": 11
+            },
+            "elementType": "INTEGER",
+            "required": true
+          },
+          {
+            "fieldName": "rgb",
+            "dataType": "INTEGER",
+            "range": {
+              "min": 0,
+              "max": 16777215,
+              "precision": 1
+            },
+            "required": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "devices.capabilities.color_setting",
+      "instance": "colorRgb",
+      "parameters": {
+        "dataType": "INTEGER",
+        "range": {
+          "min": 0,
+          "max": 16777215,
+          "precision": 1
+        }
+      }
+    },
+    {
+      "type": "devices.capabilities.color_setting",
+      "instance": "colorTemperatureK",
+      "parameters": {
+        "dataType": "INTEGER",
+        "range": {
+          "min": 1000,
+          "max": 10000,
+          "precision": 1
+        }
+      }
+    },
+    {
+      "type": "devices.capabilities.toggle",
+      "instance": "gradientToggle",
+      "parameters": {
+        "dataType": "ENUM",
+        "options": [
+          {
+            "name": "on",
+            "value": 1
+          },
+          {
+            "name": "off",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "type": "devices.capabilities.dynamic_scene",
+      "instance": "lightScene",
+      "parameters": {
+        "dataType": "ENUM",
+        "options": []
+      }
+    },
+    {
+      "type": "devices.capabilities.dynamic_scene",
+      "instance": "diyScene",
+      "parameters": {
+        "dataType": "ENUM",
+        "options": []
+      }
+    },
+    {
+      "type": "devices.capabilities.music_setting",
+      "instance": "musicMode",
+      "parameters": {
+        "dataType": "STRUCT",
+        "fields": [
+          {
+            "fieldName": "musicMode",
+            "dataType": "ENUM",
+            "options": [
+              {
+                "name": "Intermittent Flash",
+                "value": 0
+              },
+              {
+                "name": "Hopping",
+                "value": 1
+              },
+              {
+                "name": "Heart Beat",
+                "value": 2
+              },
+              {
+                "name": "Touching",
+                "value": 3
+              },
+              {
+                "name": "Piano Keys",
+                "value": 4
+              },
+              {
+                "name": "Neon",
+                "value": 5
+              },
+              {
+                "name": "Dynamic Color",
+                "value": 6
+              },
+              {
+                "name": "Wander",
+                "value": 7
+              }
+            ],
+            "required": true
+          },
+          {
+            "unit": "unit.percent",
+            "fieldName": "sensitivity",
+            "dataType": "INTEGER",
+            "range": {
+              "min": 0,
+              "max": 100,
+              "precision": 1
+            },
+            "required": true
+          },
+          {
+            "fieldName": "autoColor",
+            "dataType": "ENUM",
+            "options": [
+              {
+                "name": "on",
+                "value": 1
+              },
+              {
+                "name": "off",
+                "value": 0
+              }
+            ],
+            "required": false
+          },
+          {
+            "fieldName": "rgb",
+            "dataType": "INTEGER",
+            "range": {
+              "min": 0,
+              "max": 16777215,
+              "precision": 1
+            },
+            "required": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "devices.capabilities.toggle",
+      "instance": "dreamViewToggle",
+      "parameters": {
+        "dataType": "ENUM",
+        "options": [
+          {
+            "name": "on",
+            "value": 1
+          },
+          {
+            "name": "off",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "type": "devices.capabilities.dynamic_scene",
+      "instance": "snapshot",
+      "parameters": {
+        "dataType": "ENUM",
+        "options": []
+      }
+    }
+  ]
+}

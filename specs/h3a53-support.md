@@ -41,7 +41,7 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 - [ ] Capture `devStatus` replies in several states: off, RGB, white temperature, a scene, and with segments set in the app. Look for extra fields beyond `onOff`/`brightness`/`color`/`colorTemInKelvin`
 - [x] Check the basic JSON commands with an unregistered sku (on/off only today), then with a provisional entry: `turn`, `brightness`, `colorwc` RGB, `colorwc` Kelvin at 1000 / 2000 / 9000 / 10000 (does the device accept below 2000 and above 9000?)
 - [ ] Write a reusable R&D probe script (scan, status, send raw ptReal hex, log every datagram). Decide where it lives: `scripts/` if useful upstream, otherwise `specs/tools/`
-- [ ] Optional: dump the OpenAPI capabilities (`GET /router/api/v1/user/devices` with your Govee API key) and save the H3A53 entry. Look for segment counts and any dual-layer capability
+- [x] Optional: dump the OpenAPI capabilities (`GET /router/api/v1/user/devices` with your Govee API key) and save the H3A53 entry. Look for segment counts and any dual-layer capability
 - [x] ~~Capture the app's BLE traffic~~: done 2026-11-14 with an iPhone and PacketLogger. **The H3A53's BLE link is encrypted**, so it can't be read (see findings)
 - [x] Capture the iPhone's network traffic (`rvictl -s <UDID>`, then tshark on `rvi0`) while changing upper/lower colours with the phone's Wi-Fi **on**: does the app send LAN `ptReal` to 192.168.1.132:4003 (readable), or only cloud traffic (TLS)?
 
@@ -142,3 +142,9 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
   - **Conclusion:** on this firmware the LAN `ptReal` channel is write-only, and the device doesn't report segment or zone state over the LAN.
 - **2026-11-14:** Repeated the iPhone network capture with LAN Control confirmed **on**. The user noticed it had been off during the first capture; it seems to switch itself off. The phone was on home Wi-Fi (source `2601:600:…`, not cellular `2607:fb91:…`). Result: the same cloud MQTT/TLS exchanges to AWS (t≈11–56 s, burst at 132 s) and **zero** packets to 192.168.1.132 or UDP 4001–4003.
   - **Conclusion:** the Govee app never uses the LAN API for control, so sniffing can't reveal the zone command. Next routes: decompile the Android app, the OpenAPI capability dump, or batch trial-and-error on the LAN.
+- **2026-11-14:** Trial batch "sub" (scratchpad `trial.py`; each step: white flash, then all blue, then candidate red on mask `ff0f`): `33 05 15 03`…`08` with the `01` layout. **No visible effect for any of them** (run twice, watched the second time).
+- **2026-11-14:** OpenAPI capabilities (`GET /router/api/v1/user/devices`), saved to `specs/research/openapi_capabilities_H3A53.json`. The API key isn't stored anywhere.
+  - `segmentedColorRgb` and `segmentedBrightness`: **12 segments** (indices 0–11). Brightness per segment is 0–100.
+  - `colorTemperatureK` **1000–10000** (confirms the range), `colorRgb`, `brightness` 1–100, `powerSwitch`.
+  - Also: `gradientToggle`, `dreamViewToggle`, `musicMode` (8 modes + sensitivity/autoColor/rgb), and `lightScene` / `diyScene` / `snapshot` (options empty in this listing; they come from the scenes endpoint).
+  - **No dual-layer / upper-lower zone capability.** Govee's public API models the H3A53 as a plain 12-segment RGBIC light. Zone control only exists in the app.
