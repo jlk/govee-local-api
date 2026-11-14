@@ -47,11 +47,11 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 
 ## Phase 2 — Baseline support (first upstreamable PR, closes #385)
 
-- [ ] Add `"H3A53": create_with_capabilities(True, True, True, <segments>, temperature_range=(1000, 10000))` to `GOVEE_LIGHT_CAPABILITIES`. Decide on adding H3A51 (and H3A52?), which share the scene library, given we can't test them
-- [ ] Run `uv run python scripts/generate_model_scenes.py` (expect the 4 firmware scenes) and let the pre-commit hook regenerate `SUPPORTED_DEVICES.md`
-- [ ] Tests: registry entry (features, segment count, temperature range), `ColorMessage` clamping at 1000/10000 for this model, scenes loaded
-- [ ] Check on the real device: power, brightness, RGB, Kelvin endpoints, each of the 4 scenes
-- [ ] Commit the code (code-only commit); tick items here (specs-only commit)
+- [x] Add `"H3A53": create_with_capabilities(True, True, True, 12, temperature_range=(1000, 10000))` to `GOVEE_LIGHT_CAPABILITIES`. H3A51/H3A52 **not** added: same scene library, but untested (can be offered upstream as a follow-up)
+- [x] Run `uv run python scripts/generate_model_scenes.py` (4 firmware scenes plus 87 parameter scenes, see Phase 5) and let the pre-commit hook regenerate `SUPPORTED_DEVICES.md`
+- [x] Tests: registry entry (features, segment count, temperature range), `ColorMessage` clamping at 1000/10000 for this model, scenes loaded
+- [x] Check on the real device through `GoveeController` (`specs/tools/verify_library.py`): brightness, RGB, 1000 K, segment 12, firmware Rainbow, parameter scene Forest. Not every scene was played individually
+- [x] Commit the code (code-only commit `7485bc5`); tick items here (specs-only commit)
 
 ## Phase 3 — Segment and dual-layer R&D
 
@@ -73,9 +73,9 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 
 ## Phase 5 — Type-6 library scenes (stretch)
 
-- [ ] Decode the `sceneType` 6 / `cmdVersion` 6 `scenceParam` blob format: compare with the type-2 blobs in the H705D library and with what `SceneCodeMessage` sends
-- [ ] Check whether `SceneCodeMessage` (the `a3` multi-frame stream plus `33 05 04` activation) plays a type-6 scene as-is; if not, find the needed changes
-- [ ] If playable: extend `fetch_scene_library.py` / `generate_model_scenes.py` so they can emit blob scenes for models that need them, without changing existing models' output. Add tests
+- [ ] Decode the `sceneType` 6 / `cmdVersion` 6 `scenceParam` blob format (partly done: record structure, blending and pattern bytes; see findings): compare with the type-2 blobs in the H705D library and with what `SceneCodeMessage` sends
+- [x] Check whether `SceneCodeMessage` plays a type-6 scene as-is: yes, once the blob's leading `0x0a` is dropped
+- [x] If playable: extend `fetch_scene_library.py` / `generate_model_scenes.py` so they can emit blob scenes for models that need them, without changing existing models' output. Add tests
 
 ## Phase 6 — Wrap-up and upstream
 
@@ -195,3 +195,6 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 
   - **Conclusions:** neither header byte 3 nor the tail byte `rec[-2]` selects a zone. A single record covers both zones. Two plain records: the last wins. Bytes 1–2 look like a spatial pattern (`03 05` = every node but one; `02 0a` = nothing visible). `03 05` and byte 4 = `02` make records **blend additively**.
   - **Zone selector still unknown.** The only per-zone result so far is stock Aurora rec0 (`000305000201ff8803801414038414`, 5 colours) sitting on the upper zone next to rec1. Next ideas: transplant rec0's header bytes 7–14 into the template one at a time; or decompile the Android app to read the effect-record format.
+
+- **2026-11-14:** Implemented in `7485bc5`. The registry entry has 12 segments and 1000–10000 K. There are 87 parameter scenes as `[code, base64 param]` (stripped of `0x0a`) in `model_scenes.json`, loaded into `GoveeLightCapabilities.parameter_scenes`, and played by `set_scene()`. The generator allowlist is `PARAMETER_SCENE_MODELS = {"H3A53"}`. Duplicate names are numbered: `dusk`/`dusk_2` (two "Dusk" in Sky) and `mild`/`mild_2` (Soothing/Emotion). 215 tests pass.
+  - End-to-end check via `GoveeController` (manual discovery queue, then `set_brightness`, `set_rgb_color`, `set_scene("forest")`, `set_scene("rainbow")`, `set_temperature(1000)`, `set_segment_rgb_color(12, …)`): the user saw every step (second run; they missed the first).
