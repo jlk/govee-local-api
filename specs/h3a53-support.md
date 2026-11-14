@@ -39,7 +39,7 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 - [x] Turn on **LAN Control** for the H3A53 in the Govee app; confirm it's on 192.168.1.x
 - [x] Capture its `scan` reply (IP, fingerprint, sku, firmware versions) and save it in the findings log
 - [ ] Capture `devStatus` replies in several states: off, RGB, white temperature, a scene, and with segments set in the app. Look for extra fields beyond `onOff`/`brightness`/`color`/`colorTemInKelvin`
-- [ ] Check the basic JSON commands with an unregistered sku (on/off only today), then with a provisional entry: `turn`, `brightness`, `colorwc` RGB, `colorwc` Kelvin at 1000 / 2000 / 9000 / 10000 (does the device accept below 2000 and above 9000?)
+- [x] Check the basic JSON commands with an unregistered sku (on/off only today), then with a provisional entry: `turn`, `brightness`, `colorwc` RGB, `colorwc` Kelvin at 1000 / 2000 / 9000 / 10000 (does the device accept below 2000 and above 9000?)
 - [ ] Write a reusable R&D probe script (scan, status, send raw ptReal hex, log every datagram). Decide where it lives: `scripts/` if useful upstream, otherwise `specs/tools/`
 - [ ] Optional: dump the OpenAPI capabilities (`GET /router/api/v1/user/devices` with your Govee API key) and save the H3A53 entry. Look for segment counts and any dual-layer capability
 - [ ] Optional: capture what the app sends while changing upper/lower colours on one segment. Options: Android Bluetooth HCI snoop log (BLE frames match ptReal payloads), or check whether the app uses LAN at all (Wireshark on port 4003)
@@ -98,3 +98,19 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
   - The `devStatus` reply has the standard four fields and nothing more: no per-zone or per-segment state.
   - `colorTemInKelvin: 1000` while off: the device reports 1000 K, below the library's 2000 K default minimum, which fits the 1000–10000 K spec. To check: is this the last white setting or a placeholder?
   - The library logs "Device H3A53 is not supported" and falls back to on/off only, as expected.
+
+- **2026-11-14:** Basic JSON commands, sent raw to 192.168.1.132:4003 with no clamping, while watching the lights. Every command was echoed exactly by the following `devStatus`:
+
+  | Command               | Observed                                                     |
+  | --------------------- | ------------------------------------------------------------ |
+  | `turn` 1              | On; both zones warm white (it was left at 1000 K)            |
+  | `brightness` 100      | Brighter; status reports 100                                 |
+  | `colorwc` rgb 255/0/0 | **Both** zones red                                           |
+  | `colorwc` rgb 0/0/255 | **Both** zones blue                                          |
+  | `colorwc` 1000 K      | Both zones, very orange                                      |
+  | `colorwc` 2000 K      | Clearly less orange than 1000 K, so 1000 K is a real setting |
+  | `colorwc` 9000 K      | Bluish white                                                 |
+  | `colorwc` 10000 K     | Accepted; can't be told apart from 9000 K by eye             |
+
+  - **Conclusion:** the standard JSON command set works and drives both zones together. Use `temperature_range=(1000, 10000)`; with the default range, `ColorMessage` would clamp away 1000–2000 K, which is clearly visible.
+  - **Still open:** controlling each zone separately has to go through `ptReal` (Phase 3).
