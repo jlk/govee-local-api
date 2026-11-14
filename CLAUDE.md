@@ -23,16 +23,23 @@ uv build                                 # Build package
 CI runs **Black** for formatting. Pre-commit hooks include Black, Ruff (with `--fix`), codespell, prettier, and mypy.
 
 ```bash
-pre-commit run --all-files                   # Run all pre-commit hooks
+uvx pre-commit run --all-files               # Run all pre-commit hooks (pre-commit isn't a project dependency)
+uvx pre-commit run --files <paths>           # Run hooks on specific files
 ```
 
 ## Architecture
 
 The library is a pure asyncio UDP protocol implementation with no external runtime dependencies.
 
-- **`controller.py`** — `GoveeController(asyncio.DatagramProtocol)`: Main entry point. Manages device discovery via UDP multicast (239.255.255.250), periodic status polling, and device eviction. Sends commands to devices on port 4003, listens on port 4002, broadcasts discovery on port 4001.
-- **`device.py`** — `GoveeDevice`: Represents a single Govee light. Holds state (on/off, brightness, color, temperature), exposes the model's Kelvin range as `temperature_range` (falling back to the default range when the device has no capabilities) and exposes async control methods that delegate back to the controller.
-- **`message.py`** — Message protocol. `GoveeMessage` is the base class; subclasses handle specific commands (`ScanMessage`, `OnOffMessage`, `ColorMessage`, `BrightnessMessage`, etc.). `PtRealMessage` handles binary commands with XOR checksum encoding via base64. `MessageResponseFactory` parses incoming JSON messages into typed response objects. `ColorMessage` clamps white temperatures to the range it is given, falling back to `DEFAULT_TEMPERATURE_RANGE` imported from `light_capabilities` — the message layer keeps no Kelvin constants of its own.
+- **`controller.py`** — `GoveeController`: Main entry point (a plain class, not itself a protocol). Manages device discovery via UDP multicast (239.255.255.250), periodic status polling, and device eviction, each on its own `loop.call_later` timer chain. Sends commands to devices on port 4003, listens on port 4002, broadcasts discovery on port 4001.
+  - **Multiple interfaces:** `listening_addresses` takes one address or a list, each optionally with an inline mask (`"192.168.1.100/24"` or `/255.255.255.0`; see `NETWORK_MASKS.md`). Every address gets its own socket (an `_Endpoint`: address, network, transport, protocol), built by hand in `_create_listening_socket` so `SO_REUSEADDR`/`SO_REUSEPORT`/`SO_BROADCAST` are set before `bind()`. Duplicates are dropped, and `0.0.0.0` is dropped when mixed with specific addresses. `_get_best_transport_for_ip` picks the socket for a target: subnet match when a mask was given, else the `network.py` heuristic, else the first specific address (with a warning). Endpoint order is behavior: the first match wins.
+  - **Lifecycle:** `start(require_all=True)` binds everything or nothing. `start(require_all=False)` keeps what binds and records the rest in `bind_failures`, which `rebind_failed()` retries without disturbing live endpoints. `cleanup()` is idempotent, waits for every endpoint's `connection_lost` (counted via `_pending_close`), and has a timeout safety net (`_force_cleanup_done`). An unexpected `connection_lost` outside cleanup drops just that endpoint.
+  - **Incoming messages:** `_handle_datagram_received` dispatches on the message's `cmd` through `_response_handler` (currently `scan` and `devStatus`; `status` is parsed but ignored) and never lets an exception escape the task.
+  - **Devices:** a device remembers the transport it was last heard on and `_send_message` prefers it. Scan responses refresh `lastseen` and track DHCP IP changes. Manually added IPs wait in the registry's queue, are probed by unicast scan, and go back into the queue if evicted.
+- **`protocol.py`** — `GoveeControllerProtocol(asyncio.DatagramProtocol)`: one per endpoint. Configures multicast (TTL, `IP_MULTICAST_IF`, `IP_ADD_MEMBERSHIP`) on `connection_made`, schedules `_handle_datagram_received` per datagram, and logs `error_received`.
+- **`network.py`** — Parses listening addresses with inline masks (an explicitly given but invalid mask raises `ValueError`) and holds the same-network heuristic (same /24, or both in 10/8, 192.168/16, or 172.16/12).
+- **`device.py`** — `GoveeDevice`: Represents a single Govee light. Holds state (on/off, brightness, color, temperature; control methods update it optimistically, and the next `devStatus` poll corrects it), exposes the model's Kelvin range as `temperature_range` (falling back to the default range when the device has no capabilities) and exposes async control methods that delegate back to the controller.
+- **`message.py`** — Message protocol. `GoveeMessage` is the base class; subclasses handle specific commands (`ScanMessage`, `OnOffMessage`, `ColorMessage`, `BrightnessMessage`, etc.). `PtRealMessage` handles binary commands (BLE-style frames with an XOR checksum, base64-encoded): `SegmentColorMessages` (`33 05 15 01 RGB ... <2-byte segment mask>`), `SceneMessages` (one-byte firmware scene), `SceneCodeMessage` (library scene code plus optional multi-frame `a3` parameter blob) and `HexMessage` (raw). `MessageResponseFactory` parses incoming JSON messages into typed response objects. `ColorMessage` clamps white temperatures to the range it is given, falling back to `DEFAULT_TEMPERATURE_RANGE` imported from `light_capabilities` — the message layer keeps no Kelvin constants of its own.
 - **`light_capabilities.py`** — Device capability registry. `GoveeLightCapabilities` defines what features a device model supports (RGB, color temperature, brightness, segments, scenes) and its Kelvin `temperature_range` (`GoveeTemperatureRange`, defaulting to `DEFAULT_TEMPERATURE_RANGE` = 2000-9000 K — the single source of truth for the default range, also used by `ColorMessage`). `GOVEE_LIGHT_CAPABILITIES` is the dict mapping SKU strings to capabilities. New device support is added here. Entries carry no scenes: at import `_with_model_scenes()` replaces every entry's scenes with that model's set from the packaged `data/model_scenes.json` (models missing from it get none), sharing one capabilities object between models with the same base capabilities and scene set.
 - **`device_registry.py`** — `DeviceRegistry`: Internal store of discovered devices and a queue for manually-added device IPs.
 
@@ -44,9 +51,16 @@ To add a new Govee device model, add an entry to `GOVEE_LIGHT_CAPABILITIES` in `
 
 `SUPPORTED_DEVICES.md` is auto-generated from the registry by the `generate-supported-devices` pre-commit hook (`scripts/generate_supported_devices.py`) — never edit it by hand.
 
+## Git Workflow
+
+- `origin` is the user's fork (`github.com/jlk/govee-local-api`); `upstream` is `Galorhallen/govee-local-api`. Base branch is `develop`.
+- Changes are cherry-picked back to upstream as clean PRs, so **AI-tooling files (`CLAUDE.md`, `specs/`, anything genai-related) always go in their own commits**, never mixed with `src/`, `tests/`, `scripts/` or data changes.
+- `specs/` holds working plans used as to-do lists. Tick items off (`- [x]`) as they are completed, in a specs-only commit.
+- Add or update tests alongside every functional change.
+
 ## Key Conventions
 
 - Version lives only in `pyproject.toml` (bump with `uv version --bump <part>`); `__version__` reads it from the installed package metadata
-- Tests are in `tests/` and use plain pytest (no fixtures framework)
+- Tests are in `tests/` and use plain pytest or `unittest.TestCase` classes (no fixtures framework); they must pass on macOS as well as Linux
 - `pythonpath = "src"` is configured in pytest settings — imports use `govee_local_api.*`
 - CI tests against Python 3.11, 3.12, and 3.13
