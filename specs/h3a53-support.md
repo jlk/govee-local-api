@@ -42,7 +42,8 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 - [x] Check the basic JSON commands with an unregistered sku (on/off only today), then with a provisional entry: `turn`, `brightness`, `colorwc` RGB, `colorwc` Kelvin at 1000 / 2000 / 9000 / 10000 (does the device accept below 2000 and above 9000?)
 - [ ] Write a reusable R&D probe script (scan, status, send raw ptReal hex, log every datagram). Decide where it lives: `scripts/` if useful upstream, otherwise `specs/tools/`
 - [ ] Optional: dump the OpenAPI capabilities (`GET /router/api/v1/user/devices` with your Govee API key) and save the H3A53 entry. Look for segment counts and any dual-layer capability
-- [ ] Optional: capture what the app sends while changing upper/lower colours on one segment. Options: Android Bluetooth HCI snoop log (BLE frames match ptReal payloads), or check whether the app uses LAN at all (Wireshark on port 4003)
+- [x] ~~Capture the app's BLE traffic~~: done 2026-11-14 with an iPhone and PacketLogger. **The H3A53's BLE link is encrypted**, so it can't be read (see findings)
+- [ ] Capture the iPhone's network traffic (`rvictl -s <UDID>`, then tshark on `rvi0`) while changing upper/lower colours with the phone's Wi-Fi **on**: does the app send LAN `ptReal` to 192.168.1.132:4003 (readable), or only cloud traffic (TLS)?
 
 ## Phase 2 — Baseline support (first upstreamable PR, closes #385)
 
@@ -128,3 +129,9 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
   - **Conclusions:** the standard 12-bit segment mask works, and each bit colours **both zones** of its heads. The bits beyond 12 that we tried don't reach a second zone. `devStatus` only reflects colour commands that cover the whole run.
   - **Mistakes during the session (for the record):** a mis-built `ptReal` sent five frames padded to 19 bytes, the first being `33 05 15 00 …`, with no visible effect reported. A frame with the mask shifted one byte, and possibly a frame with a bad checksum, were also sent. From then on every frame was built with the library classes.
   - **Type-6 scene blobs** (`specs/research/scene_library_H3A53.json`) are layered effect descriptions (colour lists, timing, layer counts, e.g. Forest `0a042b0002140c…`), not simple per-zone frames. Not decoded yet (Phase 5).
+
+- **2026-11-14:** iPhone BLE capture (`govee 2026111401.pklg`, kept out of git via `.git/info/exclude`; iPhone18,2), Govee app with the phone's Wi-Fi off. GATT: writes to handle `0x001c` (write command), notifications on `0x0018`.
+  - **Handshake:** phone → `e711 01` + 37 bytes; device → `e711 00` + 48 bytes. Looks like a session-key exchange.
+  - **After that, every PDU is** a 4-byte big-endian counter (separate counters for each direction) + 36 bytes of ciphertext. That fits a 20-byte Govee frame plus a 16-byte AEAD tag (AES-GCM/CCM style). No plain `33`/`aa`/`a3` frames appear anywhere.
+  - **Timing:** keepalive writes about every 3.00 s. Three longer, two-fragment writes (about 64 + 24 bytes) at roughly t=2370, 2379 and 2394 s, likely the user's colour actions.
+  - **Conclusion:** getting the zone commands from BLE would mean reverse-engineering the app's key exchange. Parked. Try the LAN capture via `rvictl` next.
