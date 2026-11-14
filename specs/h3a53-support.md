@@ -43,7 +43,7 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 - [ ] Write a reusable R&D probe script (scan, status, send raw ptReal hex, log every datagram). Decide where it lives: `scripts/` if useful upstream, otherwise `specs/tools/`
 - [ ] Optional: dump the OpenAPI capabilities (`GET /router/api/v1/user/devices` with your Govee API key) and save the H3A53 entry. Look for segment counts and any dual-layer capability
 - [x] ~~Capture the app's BLE traffic~~: done 2026-11-14 with an iPhone and PacketLogger. **The H3A53's BLE link is encrypted**, so it can't be read (see findings)
-- [ ] Capture the iPhone's network traffic (`rvictl -s <UDID>`, then tshark on `rvi0`) while changing upper/lower colours with the phone's Wi-Fi **on**: does the app send LAN `ptReal` to 192.168.1.132:4003 (readable), or only cloud traffic (TLS)?
+- [x] Capture the iPhone's network traffic (`rvictl -s <UDID>`, then tshark on `rvi0`) while changing upper/lower colours with the phone's Wi-Fi **on**: does the app send LAN `ptReal` to 192.168.1.132:4003 (readable), or only cloud traffic (TLS)?
 
 ## Phase 2 — Baseline support (first upstreamable PR, closes #385)
 
@@ -60,7 +60,7 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 - [ ] Try candidate layer selectors: other `33 05 15` subcommands (`02`, `03`, …), a trailing layer byte, and 3-byte masks. Keep a table of frame → observed effect
 - [ ] Try per-segment brightness (`33 05 15 02 <brightness> <mask>` on other models) and per-segment white/Kelvin
 - [ ] Use the H6008 bulbs (192.168.1.139 / .232) as a known-good control for the probe tooling
-- [ ] Find a status readback for segment state (the `status` command and its `pt` reply, which `StatusResponse` already parses)
+- [x] Find a status readback for segment state (the `status` command and its `pt` reply, which `StatusResponse` already parses)
 - [ ] Write up the confirmed command set in the findings log
 
 ## Phase 4 — Dual-layer API design and implementation
@@ -135,3 +135,8 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
   - **After that, every PDU is** a 4-byte big-endian counter (separate counters for each direction) + 36 bytes of ciphertext. That fits a 20-byte Govee frame plus a 16-byte AEAD tag (AES-GCM/CCM style). No plain `33`/`aa`/`a3` frames appear anywhere.
   - **Timing:** keepalive writes about every 3.00 s. Three longer, two-fragment writes (about 64 + 24 bytes) at roughly t=2370, 2379 and 2394 s, likely the user's colour actions.
   - **Conclusion:** getting the zone commands from BLE would mean reverse-engineering the app's key exchange. Parked. Try the LAN capture via `rvictl` next.
+- **2026-11-14:** iPhone network capture (`rvictl` → `rvi0`, 240 s, phone Wi-Fi on) while the user set the whole run blue, then one segment's upper zone red and lower zone green in the app.
+  - **The app controls the light through Govee's cloud only:** MQTT over TLS on port 8883 to AWS (`2600:1f18:…`, us-east-1), about 370-byte messages each way at t≈12, 25, 36, 43 and 54 s.
+  - **No phone ↔ 192.168.1.132 traffic at all**, and nothing on UDP 4001–4003. The cloud channel is TLS with AWS IoT client certificates, so it can't be read either.
+- **2026-11-14:** LAN readback attempts after the app had set per-zone colours: the `status` command and `ptReal` reads `aa01`, `aa0501`, `aaa501` all got **no reply**. `scan`/`devStatus` still answer by unicast (one multicast discovery pass missed the device, so multicast isn't fully reliable). `devStatus` still reported blue 0/0/255 (the last whole-run colour), with no zone information.
+  - **Conclusion:** on this firmware the LAN `ptReal` channel is write-only, and the device doesn't report segment or zone state over the LAN.
