@@ -148,7 +148,7 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
   - `colorTemperatureK` **1000–10000** (confirms the range), `colorRgb`, `brightness` 1–100, `powerSwitch`.
   - Also: `gradientToggle`, `dreamViewToggle`, `musicMode` (8 modes + sensitivity/autoColor/rgb), and `lightScene` / `diyScene` / `snapshot` (options empty in this listing; they come from the scenes endpoint).
   - **No dual-layer / upper-lower zone capability.** Govee's public API models the H3A53 as a plain 12-segment RGBIC light. Zone control only exists in the app.
-- **2026-11-14:** The R&D tools now live in `specs/tools/` (`send.py`, `query.py`, `trial.py`, `scene_test.py`), after the scratchpad was partly cleared mid-session.
+- **2026-11-14:** The R&D tools now live in `specs/tools/` (`send.py`, `query.py`, `trial.py`, `scene_recolour.py`), after the scratchpad was partly cleared mid-session.
 - **2026-11-14:** OpenAPI `device/scenes`: 91 `lightScene` entries, giving only `{"id", "paramId"}` (for example Forest `33792/46029`; the app library's sceneCode for Forest is 33741). No effect data. `diy-scenes`: none.
 - **2026-11-14:** Type-6 scene blob structure (all 87 parse): `0a <N>`, then N records, each `<len> <record>`. Records per scene: 1–6 (mostly 2–3). Record layout (fits 240/247): 15-byte header, colour count `c`, `c` RGB triples, then an 11–12-byte tail. Byte `rec[-1]` is always `ff`. Byte `rec[-2]` is always `00` or `01`, and in 2-record scenes record 0 is usually `00` and record 1 `01` (67/80), so it is probably a **layer flag**.
 - **2026-11-14:** Playing type-6 scenes over the LAN with the library's `SceneCodeMessage` (header `a3 00 01 <n> 02`, then `33 05 04 <code LE>`). Scene: Aurora, code 33742, 79-byte blob, 6 frames:

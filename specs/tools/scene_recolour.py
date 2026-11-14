@@ -1,6 +1,6 @@
 """Play an H3A53 library scene over LAN via SceneCodeMessage, optionally recoloured per layer.
 
-usage: scene_test.py IP SCENE_NAME orig|edit [--dry]
+usage: scene_recolour.py IP SCENE_NAME orig|edit [--dry]
   edit: every record whose layer byte (rec[-2]) is 0 -> all red, 1 -> all green
 """
 
