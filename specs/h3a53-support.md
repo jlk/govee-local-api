@@ -36,8 +36,8 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 
 ## Phase 1 — Device recon (get it talking on the LAN)
 
-- [ ] Turn on **LAN Control** for the H3A53 in the Govee app; confirm it's on 192.168.1.x
-- [ ] Capture its `scan` reply (IP, fingerprint, sku, firmware versions) and save it in the findings log
+- [x] Turn on **LAN Control** for the H3A53 in the Govee app; confirm it's on 192.168.1.x
+- [x] Capture its `scan` reply (IP, fingerprint, sku, firmware versions) and save it in the findings log
 - [ ] Capture `devStatus` replies in several states: off, RGB, white temperature, a scene, and with segments set in the app. Look for extra fields beyond `onOff`/`brightness`/`color`/`colorTemInKelvin`
 - [ ] Check the basic JSON commands with an unregistered sku (on/off only today), then with a provisional entry: `turn`, `brightness`, `colorwc` RGB, `colorwc` Kelvin at 1000 / 2000 / 9000 / 10000 (does the device accept below 2000 and above 9000?)
 - [ ] Write a reusable R&D probe script (scan, status, send raw ptReal hex, log every datagram). Decide where it lives: `scripts/` if useful upstream, otherwise `specs/tools/`
@@ -88,3 +88,13 @@ Raw scene libraries: `specs/research/scene_library_H3A53.json` (and
 <!-- Date each entry. Paste raw datagrams and hex frames verbatim. -->
 
 - **2026-11-14:** First LAN scan from 192.168.1.193 (bind 0.0.0.0, multicast discovery): only the two H6008 bulbs replied (192.168.1.139, 192.168.1.232; firmware 1.01.26). No H3A53 reply.
+- **2026-11-14:** With LAN Control on, the H3A53 answers multicast discovery and `devStatus`:
+
+  ```text
+  192.168.1.132 {"msg":{"cmd":"scan","data":{"ip":"192.168.1.132","device":"19:8B:C0:F8:C5:B5:1E:04","sku":"H3A53","bleVersionHard":"3.07.01","bleVersionSoft":"1.00.11","wifiVersionHard":"1.04.02","wifiVersionSoft":"1.06.18"}}}
+  192.168.1.132 {"msg":{"cmd":"devStatus","data":{"onOff":0,"brightness":58,"color":{"r":0,"g":0,"b":0},"colorTemInKelvin":1000}}}
+  ```
+
+  - The `devStatus` reply has the standard four fields and nothing more: no per-zone or per-segment state.
+  - `colorTemInKelvin: 1000` while off: the device reports 1000 K, below the library's 2000 K default minimum, which fits the 1000–10000 K spec. To check: is this the last white setting or a placeholder?
+  - The library logs "Device H3A53 is not supported" and falls back to on/off only, as expected.
